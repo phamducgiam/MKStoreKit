@@ -143,11 +143,14 @@ static MKStoreManager* _sharedStoreManager;
 
 +(id) receiptForKey:(NSString*) key {
   
-  NSData *receipt = [MKStoreManager objectForKey:key];
-  if(!receipt)
-    receipt = [MKStoreManager objectForKey:[NSString stringWithFormat:@"%@-receipt", key]];
+  NSData *receipt = [MKStoreManager dataForKey:key];
   
   return receipt;
+}
+
++(id) receiptDataForKey:(NSString *)key
+{
+    return [MKStoreManager dataForKey:[NSString stringWithFormat:@"%@.data", key]];
 }
 
 +(id) objectForKey:(NSString*) key
@@ -187,11 +190,11 @@ static MKStoreManager* _sharedStoreManager;
       [_sharedStoreManager startVerifyingSubscriptionReceipts];
     });
     
-    if([self iCloudAvailable])
+    /*if([self iCloudAvailable])
       [[NSNotificationCenter defaultCenter] addObserver:self
                                                selector:@selector(updateFromiCloud:)
                                                    name:NSUbiquitousKeyValueStoreDidChangeExternallyNotification
-                                                 object:nil];
+                                                 object:nil];*/
     
     
   }
@@ -282,6 +285,7 @@ static MKStoreManager* _sharedStoreManager;
   //loop through all the saved keychain data and remove it
   for (int i = 0; i < itemCount; i++ ) {
     [SFHFKeychainUtils deleteItemForUsername:[productsArray objectAtIndex:i] andServiceName:@"MKStoreKit" error:&error];
+    [SFHFKeychainUtils deleteItemForUsername:[NSString stringWithFormat:@"%@.data", [productsArray objectAtIndex:i]] andServiceName:@"MKStoreKit" error:&error];
   }
   if (!error) {
     return YES;
@@ -330,7 +334,11 @@ static MKStoreManager* _sharedStoreManager;
 - (BOOL) isSubscriptionActive:(NSString*) featureId
 {
   MKSKSubscriptionProduct *subscriptionProduct = [self.subscriptionProducts objectForKey:featureId];
-  if(!subscriptionProduct.receipt) return NO;
+    if (subscriptionProduct) {
+        return [subscriptionProduct isSubscriptionActive];
+    }
+    return NO;
+  /*if(!subscriptionProduct.receipt) return NO;
   
   id jsonObject = [NSJSONSerialization JSONObjectWithData:subscriptionProduct.receipt options:NSJSONReadingAllowFragments error:nil];
   NSData *receiptData = [NSData dataFromBase64String:[jsonObject objectForKey:@"latest_receipt"]];
@@ -349,7 +357,7 @@ static MKStoreManager* _sharedStoreManager;
                                                                           error:nil];
   
   NSTimeInterval expiresDate = [[receiptDict objectForKey:@"expires-date"] doubleValue]/1000.0f;
-  return expiresDate > [[NSDate date] timeIntervalSince1970];
+  return expiresDate > [[NSDate date] timeIntervalSince1970];*/
 }
 
 // Call this function to populate your UI
@@ -518,7 +526,8 @@ static MKStoreManager* _sharedStoreManager;
   for(NSString *productId in [subscriptions allKeys])
   {
     MKSKSubscriptionProduct *product = [[MKSKSubscriptionProduct alloc] initWithProductId:productId subscriptionDays:[[subscriptions objectForKey:productId] intValue]];
-    product.receipt = [MKStoreManager dataForKey:productId]; // cached receipt
+    product.receipt = [MKStoreManager receiptForKey:productId]; // cached receipt
+    product.receiptData = [MKStoreManager receiptDataForKey:productId];
     
     if(product.receipt)
     {
@@ -526,13 +535,15 @@ static MKStoreManager* _sharedStoreManager;
        {
          if([isActive boolValue] == NO)
          {
-           [[NSNotificationCenter defaultCenter] postNotificationName:kSubscriptionsInvalidNotification
-                                                               object:product.productId];
-           
            NSLog(@"Subscription: %@ is inactive", product.productId);
            product.receipt = nil;
+           product.receiptData = nil;
            [self.subscriptionProducts setObject:product forKey:productId];
            [MKStoreManager setObject:nil forKey:product.productId];
+           [MKStoreManager setObject:nil forKey:[NSString stringWithFormat:@"%@.data", product.productId]];
+             
+           [[NSNotificationCenter defaultCenter] postNotificationName:kSubscriptionsInvalidNotification
+                                                                 object:product.productId];
          }
          else
          {
@@ -614,12 +625,20 @@ static MKStoreManager* _sharedStoreManager;
     subscriptionProduct.receipt = receiptData;
     [subscriptionProduct verifyReceiptOnComplete:^(NSNumber* isActive)
      {
-       [[NSNotificationCenter defaultCenter] postNotificationName:kSubscriptionsPurchasedNotification
-                                                           object:productIdentifier];
-       
-       [MKStoreManager setObject:receiptData forKey:productIdentifier];
-       if(self.onTransactionCompleted)
-         self.onTransactionCompleted(productIdentifier, receiptData, hostedContent);
+         if ([isActive boolValue]) {
+             [[NSNotificationCenter defaultCenter] postNotificationName:kSubscriptionsPurchasedNotification
+                                                                 object:productIdentifier];
+             
+             [MKStoreManager setObject:subscriptionProduct.receipt forKey:productIdentifier];
+             [MKStoreManager setObject:subscriptionProduct.receiptData forKey:[NSString stringWithFormat:@"%@.data",productIdentifier]];
+             if(self.onTransactionCompleted)
+                 self.onTransactionCompleted(productIdentifier, receiptData, hostedContent);
+         }
+         else {
+             if (self.onRestoreFailed) {
+                 self.onRestoreFailed(nil);
+             }
+         }
      }
                                          onError:^(NSError* error)
      {
@@ -707,8 +726,23 @@ static MKStoreManager* _sharedStoreManager;
 
 - (void)paymentQueue:(SKPaymentQueue *)queue updatedTransactions:(NSArray *)transactions
 {
+    NSMutableArray *products = [MKStoreManager allProducts];
+    NSInteger count = products.count;
+    
 	for (SKPaymentTransaction *transaction in transactions)
 	{
+        NSInteger i = 0;
+        while (i<count) {
+            NSString *productId = products[i];
+            if ([transaction.payment.productIdentifier isEqualToString:productId]) {
+                break;
+            }
+            i++;
+        }
+        if (i==count) {
+            continue;
+        }
+        
 		switch (transaction.transactionState)
 		{
 			case SKPaymentTransactionStatePurchased:
@@ -750,6 +784,7 @@ static MKStoreManager* _sharedStoreManager;
 #ifndef NDEBUG
   NSLog(@"Failed transaction: %@", [transaction description]);
   NSLog(@"error: %@", transaction.error);
+    NSLog(@"code: %d", transaction.error.code);
 #endif
 	
   [[SKPaymentQueue defaultQueue] finishTransaction: transaction];
@@ -812,7 +847,7 @@ static MKStoreManager* _sharedStoreManager;
   }
 #endif
   
-  [self provideContent: transaction.originalTransaction.payment.productIdentifier
+  [self provideContent: transaction.payment.productIdentifier
             forReceipt:transaction.transactionReceipt
          hostedContent:downloads];
 #elif TARGET_OS_MAC

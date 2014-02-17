@@ -81,8 +81,9 @@
 
 -(BOOL) isSubscriptionActive
 {    
-  if(!self.receipt) return NO;
-  if([[self.verifiedReceiptDictionary objectForKey:@"receipt"] objectForKey:@"expires_date"]){
+  if(!self.receiptData) return NO;
+  return ([[self.verifiedReceiptDictionary objectForKey:@"status"] integerValue]!=21006);
+  /*if([[self.verifiedReceiptDictionary objectForKey:@"receipt"] objectForKey:@"expires_date"]){
     
     NSTimeInterval expiresDate = [[[self.verifiedReceiptDictionary objectForKey:@"receipt"] objectForKey:@"expires_date"] doubleValue]/1000.0;        
     return expiresDate > [[NSDate date] timeIntervalSince1970];
@@ -104,7 +105,7 @@
     NSDate *purchasedDate = [df dateFromString: purchasedDateString];        
     int numberOfDays = [purchasedDate timeIntervalSinceNow] / (-86400.0);            
     return (self.subscriptionDays > numberOfDays);        
-  }
+  }*/
 }
 
 
@@ -125,12 +126,12 @@ didReceiveResponse:(NSURLResponse *)response
 
 -(NSDictionary*) verifiedReceiptDictionary {
   
-  return [NSJSONSerialization JSONObjectWithData:self.receipt options:NSJSONReadingAllowFragments error:nil];
+  return [NSJSONSerialization JSONObjectWithData:self.receiptData options:NSJSONReadingAllowFragments error:nil];
 }
 
 - (void)connectionDidFinishLoading:(NSURLConnection *)connection
 {
-  self.receipt = [self.dataFromConnection copy];
+  self.receiptData = [self.dataFromConnection copy];
   if(self.onSubscriptionVerificationCompleted)
   {
     self.onSubscriptionVerificationCompleted([NSNumber numberWithBool:[self isSubscriptionActive]]);

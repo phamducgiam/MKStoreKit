@@ -38,6 +38,7 @@
 @property (nonatomic, copy) void (^onSubscriptionVerificationFailed)();
 @property (nonatomic, copy) void (^onSubscriptionVerificationCompleted)(NSNumber* isActive);
 @property (nonatomic, strong) NSData *receipt;
+@property (nonatomic, strong) NSData *receiptData;
 @property (nonatomic, readonly) NSDictionary *verifiedReceiptDictionary;
 @property (nonatomic, assign) int subscriptionDays; 
 @property (nonatomic, strong) NSString *productId;
